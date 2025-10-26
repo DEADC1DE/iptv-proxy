@@ -51,6 +51,8 @@ type Config struct {
 	proxyfiedM3UPath string
 
 	endpointAntiColision string
+
+	channelRegistry *channelRegistry
 }
 
 // NewServer initialize a new server configuration
@@ -74,6 +76,7 @@ func NewServer(config *config.ProxyConfig) (*Config, error) {
 		nil,
 		defaultProxyfiedM3UPath,
 		endpointAntiColision,
+		newChannelRegistry(),
 	}, nil
 }
 
@@ -83,7 +86,8 @@ func (c *Config) Serve() error {
 		return err
 	}
 
-	router := gin.Default()
+	router := gin.New()
+	router.Use(gin.LoggerWithFormatter(channelAwareFormatter), gin.Recovery())
 	router.Use(cors.Default())
 	group := router.Group("/")
 	c.routes(group)

@@ -34,6 +34,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jamesnetherton/m3u"
 	xtreamapi "github.com/pierre-emmanuelJ/iptv-proxy/pkg/xtream-proxy"
+	xtream "github.com/tellytv/go.xtream-codes"
 	uuid "github.com/satori/go.uuid"
 )
 
@@ -118,6 +119,7 @@ func (c *Config) xtreamGenerateM3u(ctx *gin.Context, extension string) (*m3u.Pla
 			}
 
 			track.URI = fmt.Sprintf("%s/%s%s/%s/%s%s", c.XtreamBaseURL, prefix, c.XtreamUser, c.XtreamPassword, fmt.Sprint(stream.ID), extension)
+			c.rememberTrackChannel(&track)
 			playlist.Tracks = append(playlist.Tracks, track)
 		}
 	}
@@ -170,6 +172,7 @@ func (c *Config) xtreamGet(ctx *gin.Context) {
 			ctx.AbortWithError(http.StatusInternalServerError, err) // nolint: errcheck
 			return
 		}
+		c.rememberPlaylistChannels(&playlist)
 		if err := c.cacheXtreamM3u(&playlist, m3uURL.String()); err != nil {
 			ctx.AbortWithError(http.StatusInternalServerError, err) // nolint: errcheck
 			return
@@ -264,10 +267,7 @@ func (c *Config) xtreamPlayerAPI(ctx *gin.Context, q url.Values) {
 		return
 	}
 
-	if err != nil {
-		ctx.AbortWithError(http.StatusInternalServerError, err) // nolint: errcheck
-		return
-	}
+	c.captureXtreamResponse(action, resp)
 
 	ctx.JSON(http.StatusOK, resp)
 }
@@ -326,6 +326,7 @@ func (c *Config) xtreamStreamTimeshift(ctx *gin.Context) {
 	duration := ctx.Param("duration")
 	start := ctx.Param("start")
 	id := ctx.Param("id")
+	c.annotateChannel(ctx, id)
 	rpURL, err := url.Parse(fmt.Sprintf("%s/timeshift/%s/%s/%s/%s/%s", c.XtreamBaseURL, c.XtreamUser, c.XtreamPassword, duration, start, id))
 	if err != nil {
 		ctx.AbortWithError(http.StatusInternalServerError, err) // nolint: errcheck
@@ -368,6 +369,7 @@ func (c *Config) xtreamHlsStream(ctx *gin.Context) {
 		return
 	}
 	channel := s[0]
+	c.annotateChannel(ctx, channel)
 
 	url, err := getHlsRedirectURL(channel)
 	if err != nil {
@@ -404,6 +406,7 @@ func (c *Config) xtreamHlsStream(ctx *gin.Context) {
 
 func (c *Config) xtreamHlsrStream(ctx *gin.Context) {
 	channel := ctx.Param("channel")
+	c.annotateChannel(ctx, channel)
 
 	url, err := getHlsRedirectURL(channel)
 	if err != nil {
@@ -431,6 +434,28 @@ func (c *Config) xtreamHlsrStream(ctx *gin.Context) {
 	}
 
 	c.xtreamStream(ctx, req)
+}
+
+func (c *Config) captureXtreamResponse(action string, payload interface{}) {
+	if c == nil || c.channelRegistry == nil || payload == nil {
+		return
+	}
+
+	switch action {
+	case "get_live_streams":
+		streams, ok := payload.([]xtream.Stream)
+		if !ok {
+			return
+		}
+		for _, stream := range streams {
+			id := fmt.Sprint(stream.ID)
+			name := stream.Name
+			if name == "" || id == "" {
+				continue
+			}
+			c.rememberIdentifiers(name, id, id+".ts", id+".m3u8")
+		}
+	}
 }
 
 func getHlsRedirectURL(channel string) (*url.URL, error) {
