@@ -90,6 +90,7 @@ func (c *Config) stream(ctx *gin.Context, oriURL *url.URL) {
 
 func (c *Config) xtreamStream(ctx *gin.Context, oriURL *url.URL) {
 	id := ctx.Param("id")
+	c.annotateChannel(ctx, id)
 	if strings.HasSuffix(id, ".m3u8") {
 		c.hlsXtreamStream(ctx, oriURL)
 		return

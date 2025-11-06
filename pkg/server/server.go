@@ -51,6 +51,8 @@ type Config struct {
 	proxyfiedM3UPath string
 
 	endpointAntiColision string
+
+	channelRegistry *channelRegistry
 }
 
 // NewServer initialize a new server configuration
@@ -74,6 +76,7 @@ func NewServer(config *config.ProxyConfig) (*Config, error) {
 		nil,
 		defaultProxyfiedM3UPath,
 		endpointAntiColision,
+		newChannelRegistry(),
 	}, nil
 }
 
@@ -83,10 +86,23 @@ func (c *Config) Serve() error {
 		return err
 	}
 
-	router := gin.Default()
+	router := gin.New()
+	router.Use(gin.LoggerWithFormatter(channelAwareFormatter), gin.Recovery())
 	router.Use(cors.Default())
 	group := router.Group("/")
 	c.routes(group)
+
+	// Log features and capabilities
+	log.Printf("[iptv-proxy] Features:")
+	log.Printf("[iptv-proxy]   - Channel-aware logging: enabled")
+	log.Printf("[iptv-proxy]   - Channel registry: enabled")
+	log.Printf("[iptv-proxy]   - Advanced error handling: enabled")
+	if config.CacheFolder != "" {
+		log.Printf("[iptv-proxy]   - Response caching: enabled")
+	}
+	if config.DebugLoggingEnabled {
+		log.Printf("[iptv-proxy]   - Debug mode: enabled")
+	}
 
 	// Add a message to indicate the server is ready
 	log.Printf("[iptv-proxy] Server is ready and listening on :%d", c.HostConfig.Port)

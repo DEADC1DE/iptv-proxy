@@ -94,11 +94,13 @@ func (c *Client) login(proxyUser, proxyPassword, proxyURL string, proxyPort int,
 }
 
 // Action execute an xtream action.
-func (c *Client) Action(config *config.ProxyConfig, action string, q url.Values) (respBody interface{}, httpcode int, err error) {
+func (c *Client) Action(config *config.ProxyConfig, action string, q url.Values) (respBody interface{}, httpcode int, contentType string, err error) {
 	protocol := "http"
 	if config.HTTPS {
 		protocol = "https"
 	}
+
+	contentType = "application/json"
 
 	switch action {
 	case getLiveCategories:
