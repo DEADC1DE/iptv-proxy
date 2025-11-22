@@ -29,6 +29,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-contrib/cors"
@@ -43,7 +44,7 @@ var defaultProxyfiedM3UPath = filepath.Join(os.TempDir(), uuid.NewV4().String()+
 var endpointAntiColision = strings.Split(uuid.NewV4().String(), "-")[0]
 
 var (
-	activeStreams     = make(map[string]int)
+	activeStreams     int64
 	activeStreamsLock sync.Mutex
 )
 
@@ -129,43 +130,33 @@ func NewServer(config *config.ProxyConfig) (*Config, error) {
 	}, nil
 }
 func streamStart(streamURL string, providerMaxConns int) {
+	count := atomic.AddInt64(&activeStreams, 1)
 	activeStreamsLock.Lock()
 	defer activeStreamsLock.Unlock()
 
-	activeStreams[streamURL]++
-	uniqueCount := len(activeStreams)
-
 	log.Printf("[iptv-proxy] STREAM START: %s", streamURL)
 	if providerMaxConns > 0 {
-		log.Printf("[iptv-proxy] Active streams: %d/%d (%.0f%% capacity)",
-			uniqueCount, providerMaxConns, float64(uniqueCount)/float64(providerMaxConns)*100)
-		if uniqueCount >= providerMaxConns {
+		log.Printf("[iptv-proxy] Active connections: %d/%d (%.0f%% capacity)",
+			count, providerMaxConns, float64(count)/float64(providerMaxConns)*100)
+		if count >= int64(providerMaxConns) {
 			log.Printf("[iptv-proxy] WARNING: At or exceeding provider limit! Provider may reject connections.")
 		}
 	} else {
-		log.Printf("[iptv-proxy] Active streams: %d (provider limit unknown)", uniqueCount)
+		log.Printf("[iptv-proxy] Active connections: %d (provider limit unknown)", count)
 	}
 }
 
 func streamEnd(streamURL string, providerMaxConns int) {
+	count := atomic.AddInt64(&activeStreams, -1)
 	activeStreamsLock.Lock()
 	defer activeStreamsLock.Unlock()
 
-	if count, exists := activeStreams[streamURL]; exists {
-		if count <= 1 {
-			delete(activeStreams, streamURL)
-		} else {
-			activeStreams[streamURL]--
-		}
-	}
-	uniqueCount := len(activeStreams)
-
 	log.Printf("[iptv-proxy] STREAM END: %s", streamURL)
 	if providerMaxConns > 0 {
-		log.Printf("[iptv-proxy] Active streams: %d/%d (%.0f%% capacity)",
-			uniqueCount, providerMaxConns, float64(uniqueCount)/float64(providerMaxConns)*100)
+		log.Printf("[iptv-proxy] Active connections: %d/%d (%.0f%% capacity)",
+			count, providerMaxConns, float64(count)/float64(providerMaxConns)*100)
 	} else {
-		log.Printf("[iptv-proxy] Active streams: %d", uniqueCount)
+		log.Printf("[iptv-proxy] Active connections: %d", count)
 	}
 }
 
