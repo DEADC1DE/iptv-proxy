@@ -36,6 +36,13 @@ import (
 
 var cfgFile string
 
+// Version information (set at build time via -ldflags)
+var (
+	Version   = "dev"
+	GitCommit = "unknown"
+	BuildDate = "unknown"
+)
+
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:   "iptv-proxy",
@@ -43,6 +50,7 @@ var rootCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 
 		log.Printf("[iptv-proxy] Server is starting...")
+		log.Printf("[iptv-proxy] Version: %s (commit: %s, built: %s)", Version, GitCommit, BuildDate)
 
 		m3uURL := viper.GetString("m3u-url")
 		remoteHostURL, err := url.Parse(m3uURL)
@@ -69,6 +77,32 @@ var rootCmd = &cobra.Command{
 				xtreamBaseURL = fmt.Sprintf("%s://%s", remoteHostURL.Scheme, remoteHostURL.Host)
 				log.Printf("[iptv-proxy] INFO: xtream service enable with xtream base url: %q xtream username: %q xtream password: %q", xtreamBaseURL, xtreamUser, xtreamPassword)
 			}
+		}
+
+		config.DebugLoggingEnabled = viper.GetBool("debug-logging")
+		config.CacheFolder = viper.GetString("cache-folder")
+		if config.CacheFolder != "" {
+			// Ensure CacheFolder ends with a '/'
+			if config.CacheFolder != "" && !strings.HasSuffix(config.CacheFolder, "/") {
+				config.CacheFolder += "/"
+			}
+		}
+
+		// Log configuration details
+		log.Printf("[iptv-proxy] Configuration:")
+		log.Printf("[iptv-proxy]   - Debug Logging: %v", config.DebugLoggingEnabled)
+		if config.CacheFolder != "" {
+			log.Printf("[iptv-proxy]   - Cache Folder: %s", config.CacheFolder)
+		} else {
+			log.Printf("[iptv-proxy]   - Cache Folder: disabled")
+		}
+		log.Printf("[iptv-proxy]   - M3U Cache Expiration: %d hour(s)", viper.GetInt("m3u-cache-expiration"))
+		log.Printf("[iptv-proxy]   - Hostname: %s", viper.GetString("hostname"))
+		log.Printf("[iptv-proxy]   - Port: %d", viper.GetInt("port"))
+		log.Printf("[iptv-proxy]   - Advertised Port: %d", viper.GetInt("advertised-port"))
+		log.Printf("[iptv-proxy]   - HTTPS: %v", viper.GetBool("https"))
+		if viper.GetBool("xtream-api-get") {
+			log.Printf("[iptv-proxy]   - Xtream API Get: enabled")
 		}
 
 		conf := &config.ProxyConfig{
@@ -137,6 +171,8 @@ func init() {
 	rootCmd.Flags().String("xtream-base-url", "", "Xtream-code base url e.g(http://expample.tv:8080)")
 	rootCmd.Flags().Int("m3u-cache-expiration", 1, "M3U cache expiration in hour")
 	rootCmd.Flags().BoolP("xtream-api-get", "", false, "Generate get.php from xtream API instead of get.php original endpoint")
+	rootCmd.Flags().BoolP("debug-logging", "", false, "Enable debug logging")
+	rootCmd.Flags().String("cache-folder", "", "Cache folder to save IPTV provider responses")
 
 	if e := viper.BindPFlags(rootCmd.Flags()); e != nil {
 		log.Fatal("error binding PFlags to viper")

@@ -12,6 +12,8 @@ require (
 	github.com/tellytv/go.xtream-codes v0.0.0-20220204001149-59925bc76764
 )
 
+require github.com/buger/jsonparser v1.1.1
+
 require (
 	github.com/bytedance/sonic v1.8.0 // indirect
 	github.com/chenzhuoyu/base64x v0.0.0-20221115062448-fe3a3abad311 // indirect
