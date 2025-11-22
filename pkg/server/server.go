@@ -22,11 +22,15 @@ import (
 	"bytes"
 	"fmt"
 	"log"
+	"net/http"
 	"net/url"
 	"os"
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/gin-contrib/cors"
 	"github.com/jamesnetherton/m3u"
@@ -38,6 +42,11 @@ import (
 
 var defaultProxyfiedM3UPath = filepath.Join(os.TempDir(), uuid.NewV4().String()+".iptv-proxy.m3u")
 var endpointAntiColision = strings.Split(uuid.NewV4().String(), "-")[0]
+
+var (
+	activeStreams     int64
+	activeStreamsLock sync.Mutex
+)
 
 // Config represent the server configuration
 type Config struct {
@@ -52,7 +61,10 @@ type Config struct {
 
 	endpointAntiColision string
 
-	channelRegistry *channelRegistry
+	channelRegistry        *channelRegistry
+	httpClient             *http.Client
+	hlsClient              *http.Client
+	providerMaxConnections int
 }
 
 // NewServer initialize a new server configuration
@@ -70,6 +82,41 @@ func NewServer(config *config.ProxyConfig) (*Config, error) {
 		endpointAntiColision = trimmedCustomId
 	}
 
+	streamTransport := &http.Transport{
+		MaxIdleConns:          100,
+		MaxIdleConnsPerHost:   20,
+		MaxConnsPerHost:       0,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		DisableCompression:    true,
+		DisableKeepAlives:     false,
+	}
+
+	httpClient := &http.Client{
+		Transport: streamTransport,
+		Timeout:   0,
+	}
+
+	hlsTransport := &http.Transport{
+		MaxIdleConns:          100,
+		MaxIdleConnsPerHost:   20,
+		MaxConnsPerHost:       0,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		DisableCompression:    true,
+		DisableKeepAlives:     false,
+	}
+
+	hlsClient := &http.Client{
+		Transport: hlsTransport,
+		Timeout:   0,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
 	return &Config{
 		config,
 		&p,
@@ -77,7 +124,40 @@ func NewServer(config *config.ProxyConfig) (*Config, error) {
 		defaultProxyfiedM3UPath,
 		endpointAntiColision,
 		newChannelRegistry(),
+		httpClient,
+		hlsClient,
+		0,
 	}, nil
+}
+func streamStart(streamURL string, providerMaxConns int) {
+	count := atomic.AddInt64(&activeStreams, 1)
+	activeStreamsLock.Lock()
+	defer activeStreamsLock.Unlock()
+
+	log.Printf("[iptv-proxy] STREAM START: %s", streamURL)
+	if providerMaxConns > 0 {
+		log.Printf("[iptv-proxy] Active streams: %d/%d (%.0f%% capacity)",
+			count, providerMaxConns, float64(count)/float64(providerMaxConns)*100)
+		if count >= int64(providerMaxConns) {
+			log.Printf("[iptv-proxy] WARNING: At or exceeding provider limit! Provider may reject connections.")
+		}
+	} else {
+		log.Printf("[iptv-proxy] Active streams: %d (provider limit unknown)", count)
+	}
+}
+
+func streamEnd(streamURL string, providerMaxConns int) {
+	count := atomic.AddInt64(&activeStreams, -1)
+	activeStreamsLock.Lock()
+	defer activeStreamsLock.Unlock()
+
+	log.Printf("[iptv-proxy] STREAM END: %s", streamURL)
+	if providerMaxConns > 0 {
+		log.Printf("[iptv-proxy] Active streams: %d/%d (%.0f%% capacity)",
+			count, providerMaxConns, float64(count)/float64(providerMaxConns)*100)
+	} else {
+		log.Printf("[iptv-proxy] Active streams: %d", count)
+	}
 }
 
 // Serve the iptv-proxy api
@@ -92,7 +172,6 @@ func (c *Config) Serve() error {
 	group := router.Group("/")
 	c.routes(group)
 
-	// Log features and capabilities
 	log.Printf("[iptv-proxy] Features:")
 	log.Printf("[iptv-proxy]   - Channel-aware logging: enabled")
 	log.Printf("[iptv-proxy]   - Channel registry: enabled")
@@ -104,7 +183,6 @@ func (c *Config) Serve() error {
 		log.Printf("[iptv-proxy]   - Debug mode: enabled")
 	}
 
-	// Add a message to indicate the server is ready
 	log.Printf("[iptv-proxy] Server is ready and listening on :%d", c.HostConfig.Port)
 
 	return router.Run(fmt.Sprintf(":%d", c.HostConfig.Port))

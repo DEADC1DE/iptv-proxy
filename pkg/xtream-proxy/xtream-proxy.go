@@ -21,6 +21,7 @@ package xtreamproxy
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -52,6 +53,15 @@ func New(user, password, baseURL, userAgent string) (*Client, error) {
 	cli, err := xtream.NewClientWithUserAgent(context.Background(), user, password, baseURL, userAgent)
 	if err != nil {
 		return nil, err
+	}
+
+	maxConns := int(cli.UserInfo.MaxConnections)
+	activeConns := int(cli.UserInfo.ActiveConnections)
+	log.Printf("[iptv-proxy] Provider account info for %s:", user)
+	log.Printf("[iptv-proxy]   Max connections allowed: %d", maxConns)
+	log.Printf("[iptv-proxy]   Currently active on provider: %d", activeConns)
+	if maxConns > 0 {
+		log.Printf("[iptv-proxy]   Available connections: %d", maxConns-activeConns)
 	}
 
 	return &Client{cli}, nil

@@ -83,6 +83,10 @@ func (c *Config) xtreamGenerateM3u(ctx *gin.Context, extension string) (*m3u.Pla
 		return nil, utils.PrintErrorAndReturn(err)
 	}
 
+	if c.providerMaxConnections == 0 {
+		c.providerMaxConnections = int(client.UserInfo.MaxConnections)
+	}
+
 	cat, err := client.GetLiveCategories()
 	if err != nil {
 		return nil, utils.PrintErrorAndReturn(err)
@@ -263,6 +267,10 @@ func (c *Config) xtreamPlayerAPI(ctx *gin.Context, q url.Values) {
 	if err != nil {
 		ctx.AbortWithError(http.StatusInternalServerError, utils.PrintErrorAndReturn(err)) // nolint: errcheck
 		return
+	}
+
+	if c.providerMaxConnections == 0 {
+		c.providerMaxConnections = int(client.UserInfo.MaxConnections)
 	}
 
 	resp, httpcode, contentType, err := client.Action(c.ProxyConfig, action, q)
@@ -485,12 +493,6 @@ func getHlsRedirectURL(channel string) (*url.URL, error) {
 }
 
 func (c *Config) hlsXtreamStream(ctx *gin.Context, oriURL *url.URL) {
-	client := &http.Client{
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
-
 	req, err := http.NewRequest("GET", oriURL.String(), nil)
 	if err != nil {
 		ctx.AbortWithError(http.StatusInternalServerError, utils.PrintErrorAndReturn(err)) // nolint: errcheck
@@ -499,7 +501,7 @@ func (c *Config) hlsXtreamStream(ctx *gin.Context, oriURL *url.URL) {
 
 	mergeHttpHeader(req.Header, ctx.Request.Header)
 
-	resp, err := client.Do(req)
+	resp, err := c.hlsClient.Do(req)
 	if err != nil {
 		ctx.AbortWithError(http.StatusInternalServerError, utils.PrintErrorAndReturn(err)) // nolint: errcheck
 		return
@@ -518,6 +520,8 @@ func (c *Config) hlsXtreamStream(ctx *gin.Context, oriURL *url.URL) {
 			hlsChannelsRedirectURL[id] = *location
 			hlsChannelsRedirectURLLock.Unlock()
 
+			log.Printf("[iptv-proxy] HLS: Cached redirect URL for channel %s: %s", id, location.String())
+
 			hlsReq, err := http.NewRequest("GET", location.String(), nil)
 			if err != nil {
 				ctx.AbortWithError(http.StatusInternalServerError, utils.PrintErrorAndReturn(err)) // nolint: errcheck
@@ -526,7 +530,7 @@ func (c *Config) hlsXtreamStream(ctx *gin.Context, oriURL *url.URL) {
 
 			mergeHttpHeader(hlsReq.Header, ctx.Request.Header)
 
-			hlsResp, err := client.Do(hlsReq)
+			hlsResp, err := c.hlsClient.Do(hlsReq)
 			if err != nil {
 				ctx.AbortWithError(http.StatusInternalServerError, utils.PrintErrorAndReturn(err)) // nolint: errcheck
 				return

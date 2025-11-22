@@ -63,27 +63,37 @@ func (c *Config) m3u8ReverseProxy(ctx *gin.Context) {
 }
 
 func (c *Config) stream(ctx *gin.Context, oriURL *url.URL) {
-	client := &http.Client{}
+	streamStart(oriURL.String(), c.providerMaxConnections)
+	defer streamEnd(oriURL.String(), c.providerMaxConnections)
 
 	req, err := http.NewRequest("GET", oriURL.String(), nil)
 	if err != nil {
+		log.Printf("[iptv-proxy] ERROR creating request for %s: %v", oriURL.String(), err)
 		ctx.AbortWithError(http.StatusInternalServerError, err) // nolint: errcheck
 		return
 	}
 
 	mergeHttpHeader(req.Header, ctx.Request.Header)
 
-	resp, err := client.Do(req)
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		ctx.AbortWithError(http.StatusInternalServerError, err) // nolint: errcheck
+		log.Printf("[iptv-proxy] ERROR fetching stream from %s: %v", oriURL.String(), err)
+		ctx.AbortWithError(http.StatusBadGateway, err) // nolint: errcheck
 		return
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode >= 400 {
+		log.Printf("[iptv-proxy] WARNING upstream returned status %d for %s", resp.StatusCode, oriURL.String())
+	}
+
 	mergeHttpHeader(ctx.Writer.Header(), resp.Header)
 	ctx.Status(resp.StatusCode)
 	ctx.Stream(func(w io.Writer) bool {
-		io.Copy(w, resp.Body) // nolint: errcheck
+		_, err := io.Copy(w, resp.Body)
+		if err != nil {
+			log.Printf("[iptv-proxy] ERROR streaming data from %s: %v", oriURL.String(), err)
+		}
 		return false
 	})
 }
